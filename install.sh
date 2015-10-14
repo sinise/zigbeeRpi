@@ -2,23 +2,23 @@
 #boot and use raspi-conf. do the following
 #Expand filesystem
 #set Internationalisation option
-#set overclock maybe to 900 on rasp b+ rasp2 should maybe be set a litle higher
-#set defoult login to desktop
+#set defoult login to shell without log in
 
 
 apt-get -y update
 apt-get -y upgrade
 apt-get -y dist-upgrade
-apt-get -y install rpi-update
 rpi-update
+
+git clone git://git.drogon.net/wiringPi
 
 #Disable power management for the wifi
 #echo "# Disable power management" >> /etc/modprobe.d/8192cu.conf
 #echo "options 8192cu rtw_power_mgnt=0 rtw_enusbss=0" >> /etc/modprobe.d/8192cu.conf
 
 #copy rasp settings
-cp config.txt /boot/config.txt
-chmod 666 /boot/config.txt
+#cp config.txt /boot/config.txt
+#chmod 666 /boot/config.txt
 
 
 #disabale logs
