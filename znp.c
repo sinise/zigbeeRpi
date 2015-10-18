@@ -9,6 +9,7 @@
  * the Free Software Foundation; either version 2 of the License.
  *
  * Cross-compile with cross-gcc -I/path/to/cross-kernel/include
+ * gcc -Wall -o znp znp.c -lwiringPi
  */
 
 #include <stdint.h>
@@ -20,8 +21,14 @@
 #include <sys/ioctl.h>
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
+#include <wiringPi.h>
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#define CFG0 0
+#define CFG1 1
+#define RESET 1
+#define SRDY 3
+#define MRDY 4
 
 static void pabort(const char *s)
 {
@@ -29,30 +36,57 @@ static void pabort(const char *s)
 	abort();
 }
 
-static const char *device = "/dev/spidev1.1";
+static const char *device = "/dev/spidev0.0";
 static uint8_t mode;
 static uint8_t bits = 8;
-static uint32_t speed = 500000;
-static uint16_t delay;
+static uint32_t speed = 100000;
+static uint16_t delaySpi;
 
-static void transfer(int fd)
+static void transferPoll(int fd)
 {
 	int ret;
 	uint8_t tx[] = {
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-		0x40, 0x00, 0x00, 0x00, 0x00, 0x95,
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-		0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-		0xDE, 0xAD, 0xBE, 0xEF, 0xBA, 0xAD,
-		0xF0, 0x0D,
+		0x00, 0x00, 0x00
 	};
 	uint8_t rx[ARRAY_SIZE(tx)] = {0, };
 	struct spi_ioc_transfer tr = {
 		.tx_buf = (unsigned long)tx,
 		.rx_buf = (unsigned long)rx,
 		.len = ARRAY_SIZE(tx),
-		.delay_usecs = delay,
+		.delay_usecs = delaySpi,
+		.speed_hz = speed,
+		.bits_per_word = bits,
+	};
+
+	ret = ioctl(fd, SPI_IOC_MESSAGE(1), &tr);
+	if (ret < 1)
+		pabort("can't send spi message");
+
+	for (ret = 0; ret < ARRAY_SIZE(tx); ret++) {
+		if (!(ret % 6))
+			puts("");
+		printf("%.2X ", rx[ret]);
+	}
+	puts("");
+}
+static void transfer(int fd, int poll)
+{
+	int ret;
+	uint8_t tx[] = {
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00,
+	};
+	uint8_t rx[ARRAY_SIZE(tx)] = {0, };
+	struct spi_ioc_transfer tr = {
+		.tx_buf = (unsigned long)tx,
+		.rx_buf = (unsigned long)rx,
+		.len = ARRAY_SIZE(tx),
+		.delay_usecs = delaySpi,
 		.speed_hz = speed,
 		.bits_per_word = bits,
 	};
@@ -74,7 +108,7 @@ static void print_usage(const char *prog)
 	printf("Usage: %s [-DsbdlHOLC3]\n", prog);
 	puts("  -D --device   device to use (default /dev/spidev1.1)\n"
 	     "  -s --speed    max speed (Hz)\n"
-	     "  -d --delay    delay (usec)\n"
+	     "  -d --delaySpi    delay (usec)\n"
 	     "  -b --bpw      bits per word \n"
 	     "  -l --loop     loopback\n"
 	     "  -H --cpha     clock phase\n"
@@ -91,7 +125,7 @@ static void parse_opts(int argc, char *argv[])
 		static const struct option lopts[] = {
 			{ "device",  1, 0, 'D' },
 			{ "speed",   1, 0, 's' },
-			{ "delay",   1, 0, 'd' },
+			{ "delaySpi",   1, 0, 'd' },
 			{ "bpw",     1, 0, 'b' },
 			{ "loop",    0, 0, 'l' },
 			{ "cpha",    0, 0, 'H' },
@@ -118,7 +152,7 @@ static void parse_opts(int argc, char *argv[])
 			speed = atoi(optarg);
 			break;
 		case 'd':
-			delay = atoi(optarg);
+			delaySpi = atoi(optarg);
 			break;
 		case 'b':
 			bits = atoi(optarg);
@@ -158,6 +192,22 @@ int main(int argc, char *argv[])
 {
 	int ret = 0;
 	int fd;
+	
+
+        /*
+         * initialice control pins
+         */
+        wiringPiSetup () ;
+        pinMode (CFG0, OUTPUT) ; //cfg0 High to indicate slep crystal
+        pinMode (CFG1, OUTPUT) ; //cfg1 High to indicate SPI main pin conf
+        pinMode (RESET, OUTPUT) ; //reset
+        pinMode (SRDY, INPUT)  ; //SRDY
+        pinMode (MRDY, OUTPUT) ; //MRDY
+
+        digitalWrite (CFG0, HIGH) ;
+        digitalWrite (CFG1, HIGH) ;
+        digitalWrite (MRDY, HIGH) ;
+        digitalWrite (RESET, LOW) ; delay (500) ;
 
 	parse_opts(argc, argv);
 
@@ -202,7 +252,30 @@ int main(int argc, char *argv[])
 	printf("bits per word: %d\n", bits);
 	printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
-	transfer(fd);
+        digitalWrite (RESET, HIGH) ; delay(100); // ready to start oporation release reset on  cc2530
+
+	printf("CC2530 Reset released delay 1 sec\n");
+	delay(1000);
+	int count = 0;
+	printf("waiting for cc2530 to set SRDY low\n");
+	while(digitalRead(SRDY)){
+		count++;
+	};
+	printf("SRDY is low\n");
+        digitalWrite (MRDY, LOW) ;
+	delay(200);
+	printf("MRDY (and ss) set to low to indicate we are ready to receive\n");
+	transferPoll(fd);
+	printf("wait for SRDY to go high\n");
+	while(!digitalRead(SRDY)){
+		count++;
+	};
+	printf("SRDY is high\n");
+	transfer(fd, 0);
+	printf("we counted %d\n", count);
+	printf("mode %d \n",  mode);
+        digitalWrite (MRDY, HIGH) ;
+
 
 	close(fd);
 

@@ -3,14 +3,21 @@
 #Expand filesystem
 #set Internationalisation option
 #set defoult login to shell without log in
-
+# enable device tree if you use bcm2835
 
 apt-get -y update
 apt-get -y upgrade
 apt-get -y dist-upgrade
 rpi-update
 
-git clone git://git.drogon.net/wiringPi
+
+# if using the bcm 2835 do this
+wget http://www.airspayce.com/mikem/bcm2835/bcm2835-1.46.tar.gz
+
+
+
+
+#git clone git://git.drogon.net/wiringPi
 
 #Disable power management for the wifi
 #echo "# Disable power management" >> /etc/modprobe.d/8192cu.conf
